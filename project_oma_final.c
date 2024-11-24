@@ -1,7 +1,8 @@
 /*TEKIJÄT:
-Aapo Heikkilä
-Juho Kaisanlahti
-Emil Mäenpää*/
+* Aapo Heikkilä
+* Juho Kaisanlahti
+* Emil Mäenpää
+*/
 
 /*  Tämä kooditiedosto sisältää kolme tehtävää eli taskia:
     1. Liikeanturidataa lukeva tehtävä, jonka toteuttaa funktio mpu_sensorFxn(UArg arg0, UArg arg1). Tämä funktio avaa oman i2c-sarjaliikenneyhteyden
