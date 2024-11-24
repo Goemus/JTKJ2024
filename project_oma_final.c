@@ -1,9 +1,8 @@
 /*TEKIJÄT:
-* Aapo Heikkilä
-* Juho Kaisanlahti
-* Emil Mäenpää
-*/
-
+ * Aapo Heikkilä (toiminnallisuus, testaus ja debuggaus)
+ * Juho Kaisanlahti (toiminnallisuus, testaus ja debuggaus)
+ * Emil Mäenpää (toiminnallisuus, testaus ja debuggaus)
+ */
 /*  Tämä kooditiedosto sisältää kolme tehtävää eli taskia:
     1. Liikeanturidataa lukeva tehtävä, jonka toteuttaa funktio mpu_sensorFxn(UArg arg0, UArg arg1). Tämä funktio avaa oman i2c-sarjaliikenneyhteyden
        ja jatkuvassa silmukassa lukee kiihtyvyysdataa sijoittaen saadut arvot globaaleihin muuttujiin.
@@ -13,13 +12,14 @@
        jatkuvassa silmukassa lukee UART-väylästä vastaanotettuja viestejä tai tilakoneen niin määrätessä kirjoittaa UART-väylään tulkittua liikedataa.
 
     Keskeytyksiä on käytössä kolme:
-    1. Ensimmäinen painonappikeskytys, jonka käsittelee funktio buttonFxn(). Keskeytyksen lähde on painonapin painallus, jonka laskevalla reunalla keskeytys
-       laukaistaan. Käsittelijäfunktio muuttaa tilakoneen tilaa välillä 'mittaustila päällä' - 'mittaustila pois päältä'. Lisäksi käsittelijäfunktio saa
-       aikaan sen, että UART-väylään kirjoitetaan merkki " " eli väli(lyönti).
-    2. Toinen painonappikeskeytys, jonka käsittelee funktio buttonFxn(). Keskeytyksen lähde on taas painonapin painallus, jonka laskevalla reunalla keskeytys
-       laukaistaan. Käsittelijäfunktio muuttaa tilakoneen tilan ja kutsuu funktiota, joka sammuttaa Sensortag-laitteen.
+    1. Ensimmäinen painonappikeskytys, jonka käsittelee funktio buttonFxn(). Keskeytyksen lähde on painonapin painallus, jonka laskevalla reunalla (eli kun
+       painettaessa kyseinen nappi alas vastaavan pinnin tila/jännite menee nollaan/maatasoon) keskeytys laukaistaan. Käsittelijäfunktio muuttaa tilakoneen
+       tilaa välillä 'mittaustila päällä' <-> 'mittaustila pois päältä'.
+    2. Toinen painonappikeskeytys, jonka käsittelee funktio buttonFxn_pwr(). Keskeytyksen lähde on taas (toisen) painonapin painallus, jonka laskevalla
+       reunalla keskeytys laukaistaan. Käsittelijäfunktio muuttaa globaalin merkkimuuttujan (move_msg) arvoa sekä vaihtaa tilakoneen tilan, jotta ko. merkki
+       lähetetään UART-väylään.
     3. UART-sarjaliikennekeskeytys, jonka käsittelee funktio uartFxn(). Keskeytyksen lähde on UART-väylän kautta luettu/vastaanotettu viesti. Käsittelijä-
-       funktio muuttaa tilakoneen tilaa sopivaksi viestin vastaanottamiselle.
+       funktio muuttaa tilakoneen tilaa sopivaksi viestin käsittelylle.
 
     Tässä kooditiedostossa käytetään kahta sarjaliikenneprotokollaa: UART- sekä i2c-protokollaa.
     I2c-viestintää käyttää Sensortagin RTOS kommunikaatiossa liikesensori MPU9250:n kanssa. i2c-väylän kautta luetaan data sensorin rekistereistä eli tälle
@@ -67,7 +67,7 @@ void uartFxn(UART_Handle uart, void *rxBuf, size_t len);
 void buttonFxn(PIN_Handle handle, PIN_Id pinId);
 void buttonFxn_pwr(PIN_Handle handle_pwr, PIN_Id pinId_pwr);
 void interpretUart(void);
-void powerOff(void);
+//void powerOff(void);
 void uartPrint(UART_Handle uart, const char *message);
 
 Char mpuTaskStack[STACKSIZE];
@@ -214,7 +214,7 @@ void interpret_mpu(void){
         if (fabs(*az_po+1.0)){ //if (1.0+*az_po) > 0.02 ?? kun nostetaan ylös...eli az > -1.0  FALL: if(1.0+*az_po) < -0.02...???
             *az_sum_po += fabs(*az_po+1.0);//tästä + 1.0 pois?? TAI: *az_sum_po += (1.0 + *az_po)??  FALL: *az_sum_po += (1.0+*az_po) --> else if(*az_sum_po < -0.3) --> 'FALL'
         }
-        if (((fabs(*ax_sum_po) + fabs(*ay_sum_po)) > 0.06) && (fabs(*az_sum_po) <= 0.2) && (fabs(*ax_prev_po - *ax_po) > 0.01) && (fabs(*ay_prev_po - *ay_po) > 0.01)){
+        if (((fabs(*ax_sum_po) + fabs(*ay_sum_po)) > 0.06) && (fabs(*az_sum_po) <= 0.08) && (fabs(*ax_prev_po - *ax_po) > 0.01) && (fabs(*ay_prev_po - *ay_po) > 0.01)){
             sprintf(move_msg, ".\r\n\0");
             System_printf("SLIDE\n");
             System_flush();
@@ -223,7 +223,7 @@ void interpret_mpu(void){
             *ay_sum_po = 0.0;
             *az_sum_po = 0.0;
             program_state = SENDING;
-         }else if (*az_sum_po > 0.2) { //Oli: (fabs(*az_sum_po) > 0.02){ TARVIKO NOSTAA/LASKEA KYNNYSARVOA?? Onko nyt liian korkea jos az_sum lasketaan kuten edellä ehdotettu
+         }else if (*az_sum_po > 0.08) { //Oli: (fabs(*az_sum_po) > 0.02){ TARVIKO NOSTAA/LASKEA KYNNYSARVOA?? Onko nyt liian korkea jos az_sum lasketaan kuten edellä ehdotettu
             sprintf(move_msg, "-\r\n\0");
             System_printf("JUMP\n");
             System_flush();
@@ -243,30 +243,24 @@ void interpret_mpu(void){
 
 //TOISESTA NAPISTA PÄÄLLE/POIS... PÄÄLLE:-->TOTEUTUS PUUTTUU...
 void buttonFxn_pwr(PIN_Handle handle_pwr, PIN_Id pinId_pwr){
-    if (main_mode < 2){
-        main_mode = POWER_OFF;
-        powerOff();
-    }
-    //buzzTaskFxn(0, 0);
-    //System_printf("Sammuu...pr:%d...main%d\n", program_state, main_mode);
-    //System_flush();
+    if ((program_state == WAITING || program_state == DATA_READY) && (PIN_IRQ_NEGEDGE)){ //TÄSSÄ UUTTA!!! Napista mittaus pois, joten miksei jotain muutakin...
+            buzzTaskFxn(0, 0);
+            sprintf(move_msg, " \r\n\0");
+            System_printf("BUTTON\n");
+            System_flush();
+            program_state = SENDING;
+}
 }
 
 void buttonFxn(PIN_Handle handle, PIN_Id pinId){
     //buzzTaskFxn(0, 0);
-    //if (main_mode == MEASURE_ON){
-    //    main_mode = MEASURE_OFF;
-    //}else if (main_mode == MEASURE_OFF){
-    //    main_mode = MEASURE_ON;
-    //}
-    if ((program_state == WAITING || program_state == DATA_READY) && (PIN_IRQ_NEGEDGE)){ //TÄSSÄ UUTTA!!! Napista mittaus pois, joten miksei jotain muutakin...
-        buzzTaskFxn(0, 0);
-        sprintf(move_msg, " \r\n\0");
-        System_printf("BUTTON\n");
-        System_flush();
-        program_state = SENDING;
+    if (main_mode == MEASURE_ON){
+        main_mode = MEASURE_OFF;
+    }else if (main_mode == MEASURE_OFF){
+        main_mode = MEASURE_ON;
     }
 }
+
 
 //void powerOff(void){
 //    if (main_mode == POWER_OFF){
